@@ -1,5 +1,7 @@
 # DeepSeek Harness Desktop
 
+[中文说明](README.zh-CN.md)
+
 Windows x64 desktop shell for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 It runs the official UI in an app window, owns a private local backend, keeps a
 single tray-resident instance, exposes API and plugin settings, and provides an
