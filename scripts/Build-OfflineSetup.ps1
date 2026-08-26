@@ -53,6 +53,20 @@ function Copy-Tree {
     }
 }
 
+function Get-Sha256 {
+    param([Parameter(Mandatory)][string]$LiteralPath)
+
+    $stream = [IO.File]::OpenRead($LiteralPath)
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-', '')
+    }
+    finally {
+        $hasher.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Test-SeedRuntime {
     param([Parameter(Mandatory)][string]$RuntimeRoot)
 
@@ -173,7 +187,7 @@ try {
     Copy-Item -LiteralPath $generatedSetup -Destination $setupPath
 
     Write-Host "Offline setup created: $setupPath"
-    Write-Host "SHA-256: $((Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash)"
+    Write-Host "SHA-256: $(Get-Sha256 -LiteralPath $setupPath)"
 }
 finally {
     if (-not $KeepStaging -and (Test-Path -LiteralPath $stage)) {
