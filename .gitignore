@@ -1,0 +1,31 @@
+# .NET and IDE
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# Local build and installer payloads
+artifacts/
+installer-staging/
+*.cab
+*.sed
+*.tar
+*.tar.gz
+*.zip
+
+# Private runtime and user data (never publish)
+runtime/
+node/
+webview2/
+.dsh/
+credentials*.yaml
+*.pfx
+*.p12
+*.key
+*.pem
+
+# Logs and local test files
+*.log
+*.tmp
+TestResults/

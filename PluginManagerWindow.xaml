@@ -1,0 +1,361 @@
+<Window x:Class="DeepSeekHarnessDesktop.PluginManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="插件中心 · DeepSeek Harness"
+        Width="980"
+        Height="760"
+        MinWidth="820"
+        MinHeight="620"
+        WindowStartupLocation="CenterOwner"
+        Background="#F5F7FB"
+        FontFamily="Microsoft YaHei UI"
+        Closing="Window_Closing">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PrimaryBrush" Color="#2161E8" />
+        <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#194FC5" />
+        <SolidColorBrush x:Key="SubtleTextBrush" Color="#64748B" />
+        <SolidColorBrush x:Key="CardBorderBrush" Color="#E2E8F0" />
+
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="{StaticResource PrimaryBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="16,9" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="7"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder"
+                                        Property="Background"
+                                        Value="{StaticResource PrimaryHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="#334155" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="#CBD5E1" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="13,8" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#F1F5F9" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="18" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="White" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1">
+            <Grid Margin="28,20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="插件中心" FontSize="24" FontWeight="SemiBold" Foreground="#0F172A" />
+                    <TextBlock Margin="0,5,0,0"
+                               Text="扩展 DeepSeek Harness 的子代理和工作能力"
+                               Foreground="{StaticResource SubtleTextBrush}" />
+                </StackPanel>
+                <Button x:Name="RefreshButton"
+                        Grid.Column="1"
+                        Content="刷新列表"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="RefreshButton_Click" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1"
+                Margin="28,16,28,0"
+                Padding="14,11"
+                CornerRadius="8"
+                Background="#FFF8E6"
+                BorderBrush="#F5C451"
+                BorderThickness="1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="⚠" FontSize="18" Margin="0,0,10,0" VerticalAlignment="Top" />
+                <TextBlock Grid.Column="1"
+                           TextWrapping="Wrap"
+                           Foreground="#754C00"
+                           Text="插件会作为受信任代码在本机运行，可能访问文件、网络和当前用户数据。只安装你确认可信的来源；每次安装或更新前还会再次询问。" />
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="2"
+                      Margin="28,16,28,10"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="ActionsPanel">
+                <TextBlock Text="官方推荐" FontSize="17" FontWeight="SemiBold" Foreground="#0F172A" />
+                <Grid Margin="0,10,0,22">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Background="#E8F0FF" CornerRadius="5" Padding="7,3" Margin="0,0,9,0">
+                                        <TextBlock Text="DeepSeek 官方" Foreground="#2157C8" FontSize="11" FontWeight="SemiBold" />
+                                    </Border>
+                                    <TextBlock x:Name="CodexStatusText" Foreground="#16815B" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock Margin="0,10,0,0" Text="Codex 子代理" FontSize="17" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,4,0,0"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Text="@deepseek-ai/dsh-subagent-codex"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="1"
+                                       Margin="0,13,0,16"
+                                       TextWrapping="Wrap"
+                                       Foreground="#475569"
+                                       Text="通过官方 app-server 协议调用 Codex，适合把独立编码任务交给子代理。" />
+                            <Button x:Name="CodexActionButton"
+                                    Grid.Row="2"
+                                    HorizontalAlignment="Left"
+                                    MinWidth="92"
+                                    Content="安装"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Click="CodexActionButton_Click" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Background="#E8F0FF" CornerRadius="5" Padding="7,3" Margin="0,0,9,0">
+                                        <TextBlock Text="DeepSeek 官方" Foreground="#2157C8" FontSize="11" FontWeight="SemiBold" />
+                                    </Border>
+                                    <TextBlock x:Name="ClaudeStatusText" Foreground="#16815B" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock Margin="0,10,0,0" Text="Claude Code 子代理" FontSize="17" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,4,0,0"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Text="@deepseek-ai/dsh-subagent-claude-code"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="1"
+                                       Margin="0,13,0,16"
+                                       TextWrapping="Wrap"
+                                       Foreground="#475569"
+                                       Text="通过官方 Agent SDK 调用 Claude Code，适合并行完成独立工作。" />
+                            <Button x:Name="ClaudeActionButton"
+                                    Grid.Row="2"
+                                    HorizontalAlignment="Left"
+                                    MinWidth="92"
+                                    Content="安装"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Click="ClaudeActionButton_Click" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="已安装" FontSize="17" FontWeight="SemiBold" Foreground="#0F172A" />
+                        <TextBlock x:Name="InstalledSummaryText"
+                                   Margin="0,4,0,0"
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   Text="正在读取……" />
+                    </StackPanel>
+                </Grid>
+
+                <Border x:Name="EmptyInstalledPanel"
+                        Visibility="Collapsed"
+                        Style="{StaticResource CardStyle}"
+                        Margin="0,0,0,12">
+                    <TextBlock Text="还没有安装外部插件。可以从上方推荐或下方自定义来源开始。"
+                               Foreground="{StaticResource SubtleTextBrush}"
+                               TextAlignment="Center" />
+                </Border>
+
+                <ItemsControl x:Name="InstalledPluginsList" Margin="0,0,0,10">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,9" Padding="16,13">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#0F172A"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <StackPanel Margin="0,5,0,0" Orientation="Horizontal">
+                                            <TextBlock Text="{Binding RequestedVersion}"
+                                                       Foreground="{StaticResource SubtleTextBrush}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="  ·  " Foreground="#94A3B8" />
+                                            <TextBlock Text="{Binding StatusText}" Foreground="#16815B" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="15,0,0,0">
+                                        <Button Content="卸载"
+                                                Tag="{Binding Name}"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Click="InstalledRemoveButton_Click" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="从其他来源安装" FontSize="17" FontWeight="SemiBold" Foreground="#0F172A" />
+                <Border Style="{StaticResource CardStyle}" Margin="0,10,0,8">
+                    <StackPanel>
+                        <TextBlock Text="插件包或地址" FontWeight="SemiBold" Foreground="#334155" />
+                        <TextBlock Margin="0,4,0,9"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                               Text="仅支持 npm 包名 + 精确版本（例如 @scope/plugin@1.2.3）。Windows 安全模式不接受 Git、本地路径或压缩包。" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="CustomSpecTextBox"
+                                     MinHeight="38"
+                                     VerticalContentAlignment="Center"
+                                     Padding="10,0"
+                                     BorderBrush="#CBD5E1"
+                                     BorderThickness="1"
+                                     FontSize="13"
+                                     ToolTip="例如：@scope/plugin@1.2.3" />
+                            <Button Grid.Column="1"
+                                    Margin="9,0,0,0"
+                                    Content="安装"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Click="CustomInstallButton_Click" />
+                        </Grid>
+                        <TextBlock Margin="0,10,0,0"
+                                   Foreground="#8A5A00"
+                                   TextWrapping="Wrap"
+                                   Text="安全说明：Git 和本地插件可能在安装时执行仓库脚本，桌面端因此不会直接运行这类来源。" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="3"
+                Background="White"
+                BorderBrush="#E2E8F0"
+                BorderThickness="0,1,0,0"
+                Padding="28,12">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="StatusText"
+                                   Text="准备就绪"
+                                   Foreground="#334155"
+                                   TextTrimming="CharacterEllipsis" />
+                        <ProgressBar x:Name="OperationProgressBar"
+                                     Height="3"
+                                     Margin="0,8,16,0"
+                                     IsIndeterminate="True"
+                                     Visibility="Collapsed" />
+                    </StackPanel>
+                    <Button x:Name="CancelOperationButton"
+                            Grid.Column="1"
+                            Content="取消"
+                            Visibility="Collapsed"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Click="CancelOperationButton_Click" />
+                </Grid>
+                <Expander x:Name="OutputExpander" Header="查看处理详情" Margin="0,9,0,0" Visibility="Collapsed">
+                    <TextBox x:Name="OutputTextBox"
+                             Margin="0,8,0,0"
+                             Height="105"
+                             Padding="9"
+                             IsReadOnly="True"
+                             TextWrapping="NoWrap"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Consolas"
+                             FontSize="11"
+                             Background="#F8FAFC"
+                             BorderBrush="#E2E8F0" />
+                </Expander>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
