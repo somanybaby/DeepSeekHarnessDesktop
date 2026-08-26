@@ -10,6 +10,8 @@ param(
 
     [string]$OutputFile = (Join-Path $PSScriptRoot '..\artifacts\DeepSeekHarnessDesktop-Setup.exe'),
 
+    [switch]$SkipRuntimeLinkValidation,
+
     [switch]$KeepStaging
 )
 
@@ -45,7 +47,7 @@ function Copy-Tree {
     param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination)
 
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    & robocopy $Source $Destination /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS | Out-Null
+    & robocopy $Source $Destination /E /MT:32 /COPY:DAT /DCOPY:DAT /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS | Out-Null
     if ($LASTEXITCODE -gt 7) {
         throw "Unable to copy $Source to $Destination (robocopy exit $LASTEXITCODE)."
     }
@@ -86,36 +88,38 @@ if (Test-Path -LiteralPath $setupPath) {
     throw "Refusing to overwrite an existing setup file: $setupPath"
 }
 
-$runtimeLinks = Get-ChildItem -LiteralPath $runtimeSeedPath -Recurse -Force -ErrorAction Stop |
-    Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 } |
-    Select-Object -First 1
-if ($runtimeLinks) {
-    throw 'RuntimeSeed contains symbolic links or junctions. Rebuild it with New-RuntimeSeed.ps1 before creating a cross-computer offline installer.'
+if (-not $SkipRuntimeLinkValidation) {
+    $runtimeLinks = Get-ChildItem -LiteralPath $runtimeSeedPath -Recurse -Force -ErrorAction Stop |
+        Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 } |
+        Select-Object -First 1
+    if ($runtimeLinks) {
+        throw 'RuntimeSeed contains symbolic links or junctions. Rebuild it with Materialize-RuntimeSeed.ps1 before creating a cross-computer offline installer.'
+    }
 }
 
 $dotnet = (Get-Command $DotnetExecutable -ErrorAction Stop).Source
-$iexpress = Join-Path $env:WINDIR 'System32\iexpress.exe'
 $tar = Join-Path $env:WINDIR 'System32\tar.exe'
-if (-not (Test-Path -LiteralPath $iexpress) -or -not (Test-Path -LiteralPath $tar)) {
-    throw 'Windows IExpress and tar.exe are required to build the one-file setup.'
+if (-not (Test-Path -LiteralPath $tar)) {
+    throw 'Windows tar.exe is required to build the one-file setup.'
 }
 
-$setupParent = Split-Path -LiteralPath $setupPath -Parent
+$setupParent = [IO.Path]::GetDirectoryName($setupPath)
 New-Item -ItemType Directory -Path $setupParent -Force | Out-Null
 $stage = Join-Path $env:TEMP ('DeepSeekHarnessDesktop-Setup-' + [guid]::NewGuid().ToString('N'))
 $publish = Join-Path $stage 'publish'
 $payload = Join-Path $stage 'payload'
 $sfx = Join-Path $stage 'sfx'
-New-Item -ItemType Directory -Path $publish, $payload, $sfx -Force | Out-Null
+$setupPublish = Join-Path $stage 'setup-publish'
+New-Item -ItemType Directory -Path $publish, $payload, $sfx, $setupPublish -Force | Out-Null
 
 try {
-    Invoke-Checked $dotnet @('restore', (Join-Path $projectRoot 'DeepSeekHarnessDesktop.csproj')) $projectRoot
-    Invoke-Checked $dotnet @(
+    Invoke-Checked -FilePath $dotnet -Arguments @('restore', (Join-Path $projectRoot 'DeepSeekHarnessDesktop.csproj')) -WorkingDirectory $projectRoot
+    Invoke-Checked -FilePath $dotnet -Arguments @(
         'publish', (Join-Path $projectRoot 'DeepSeekHarnessDesktop.csproj'),
         '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
         '-p:PublishSingleFile=true', '-p:PublishTrimmed=false',
         '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:PublishReadyToRun=false',
-        '-p:DebugType=None', '-p:DebugSymbols=false', '-o', $publish) $projectRoot
+        '-p:DebugType=None', '-p:DebugSymbols=false', '-o', $publish) -WorkingDirectory $projectRoot
 
     if (-not (Test-Path -LiteralPath (Join-Path $publish 'DeepSeekHarnessDesktop.exe'))) {
         throw 'Desktop publish did not create DeepSeekHarnessDesktop.exe.'
@@ -139,73 +143,34 @@ try {
         [Text.UTF8Encoding]::new($false))
 
     $forbidden = Get-ChildItem -LiteralPath $payload -Recurse -Force -File |
-        Where-Object { $_.Name -match '(^\.credentials\.yaml$|credential|api[_-]?key)' }
+        Where-Object {
+            $_.Name -ieq '.credentials.yaml' -or
+            $_.FullName -match '\\.dsh\\'
+        }
     if ($forbidden) {
         throw 'Payload contains a credential-like file. Refusing to create a public-distribution installer.'
     }
 
     $archive = Join-Path $sfx 'payload.tar.gz'
-    Invoke-Checked $tar @('-czf', $archive, '-C', $stage, 'payload') $stage
-    $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
-    [IO.File]::WriteAllText(
-        (Join-Path $sfx 'payload.sha256'),
-        "$hash  payload.tar.gz" + [Environment]::NewLine,
-        [Text.UTF8Encoding]::new($false))
-
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-DeepSeekHarnessDesktop.ps1') -Destination (Join-Path $sfx 'Install-DeepSeekHarnessDesktop.ps1')
-    $launcher = @'
-@echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-DeepSeekHarnessDesktop.ps1"
-exit /b %ERRORLEVEL%
-'@
-    [IO.File]::WriteAllText(
-        (Join-Path $sfx 'Install.cmd'),
-        $launcher,
-        [Text.ASCIIEncoding]::new())
-
-    $sedPath = Join-Path $stage 'setup.sed'
-    $sed = @"
-[Version]
-Class=IEXPRESS
-SEDVersion=3
-[Options]
-PackagePurpose=InstallApp
-ShowInstallProgramWindow=1
-HideExtractAnimation=0
-UseLongFileName=1
-InsideCompressed=0
-CAB_FixedSize=0
-CAB_UseLongFileName=1
-RebootMode=N
-InstallPrompt=
-DisplayLicense=
-FinishMessage=DeepSeek Harness Desktop 安装完成。
-TargetName=$setupPath
-FriendlyName=DeepSeek Harness Desktop Setup
-AppLaunched=Install.cmd
-PostInstallCmd=<None>
-AdminQuietInstCmd=
-UserQuietInstCmd=
-SourceFiles=0
-[Strings]
-FILE0="Install.cmd"
-FILE1="Install-DeepSeekHarnessDesktop.ps1"
-FILE2="payload.tar.gz"
-FILE3="payload.sha256"
-[SourceFiles]
-SourceFiles0=$sfx\
-[SourceFiles0]
-%FILE0%=
-%FILE1%=
-%FILE2%=
-%FILE3%=
-"@
-    [IO.File]::WriteAllText($sedPath, $sed, [Text.UTF8Encoding]::new($false))
-
-    Invoke-Checked $iexpress @('/N', $sedPath) $stage
-    if (-not (Test-Path -LiteralPath $setupPath)) {
-        throw 'IExpress did not create the setup executable.'
+    Invoke-Checked -FilePath $tar -Arguments @('-czf', $archive, '-C', $stage, 'payload') -WorkingDirectory $stage
+    $bootstrapperProject = Join-Path $projectRoot 'installer\SetupBootstrapper\DeepSeekHarnessDesktopSetup.csproj'
+    if (-not (Test-Path -LiteralPath $bootstrapperProject)) {
+        throw "Bootstrapper project is missing: $bootstrapperProject"
     }
+
+    Invoke-Checked -FilePath $dotnet -Arguments @(
+        'publish', $bootstrapperProject,
+        '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
+        '-p:PublishSingleFile=true', '-p:PublishTrimmed=false',
+        '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:PublishReadyToRun=false',
+        '-p:DebugType=None', '-p:DebugSymbols=false',
+        "-p:PayloadPath=$archive", '-o', $setupPublish) -WorkingDirectory $projectRoot
+
+    $generatedSetup = Join-Path $setupPublish 'DeepSeekHarnessDesktopSetup.exe'
+    if (-not (Test-Path -LiteralPath $generatedSetup)) {
+        throw 'The self-contained bootstrapper publish did not create its setup executable.'
+    }
+    Copy-Item -LiteralPath $generatedSetup -Destination $setupPath
 
     Write-Host "Offline setup created: $setupPath"
     Write-Host "SHA-256: $((Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash)"

@@ -5,6 +5,9 @@ It runs the official UI in an app window, owns a private local backend, keeps a
 single tray-resident instance, exposes API and plugin settings, and provides an
 explicit, rollback-safe core update flow.
 
+The one-file offline installer is a self-contained .NET bootstrapper. It does
+not use IExpress or CAB files, so the complete runtime can be bundled reliably.
+
 ## Privacy and first installation
 
 This repository deliberately contains **no API keys, credentials, chats,
@@ -40,11 +43,18 @@ dotnet build .\DeepSeekHarnessDesktop.csproj -c Release
 The setup is intentionally built locally rather than committed to GitHub:
 GitHub blocks large binaries and the offline payload is large.
 
-1. Create a clean runtime seed from the official npm package:
+1. Materialize a clean runtime seed from an already verified desktop runtime.
+   This removes pnpm symbolic links so a recipient does not need Windows
+   Developer Mode:
 
 ```powershell
-.\scripts\New-RuntimeSeed.ps1 -OutputRoot C:\build\dsh-runtime
+.\scripts\Materialize-RuntimeSeed.ps1 `
+  -SourceRuntime "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime" `
+  -OutputRoot C:\build\dsh-runtime
 ```
+
+`New-RuntimeSeed.ps1` is also available for a clean build directly from the
+official npm package when no verified local runtime exists.
 
 2. Build a one-file setup. Supply a Microsoft WebView2 **Fixed Version Runtime**
 folder for a fully offline package:
@@ -56,6 +66,9 @@ folder for a fully offline package:
   -DotnetExecutable 'C:\Program Files\dotnet\dotnet.exe' `
   -OutputFile C:\build\DeepSeekHarnessDesktop-Setup.exe
 ```
+
+Use `-SkipRuntimeLinkValidation` only immediately after a successful
+`Materialize-RuntimeSeed.ps1` run; it avoids repeating a long validation scan.
 
 The resulting `Setup.exe` installs to the current user's LocalAppData folder,
 creates a desktop shortcut, and starts with no API key. Do not add generated

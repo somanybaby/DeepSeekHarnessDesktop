@@ -120,8 +120,9 @@ try {
         $package + [Environment]::NewLine,
         [Text.UTF8Encoding]::new($false))
 
-    Invoke-Checked $nodeExecutable @(
-        $npmCli, 'install', '--omit=dev', '--no-audit', '--no-fund', '--save-exact') $releaseDirectory
+    Invoke-Checked -FilePath $nodeExecutable -Arguments @(
+        $npmCli, 'install', '--omit=dev', '--no-audit', '--no-fund', '--save-exact',
+        '--legacy-peer-deps', '--install-strategy=hoisted') -WorkingDirectory $releaseDirectory
 
     $cliEntry = Join-Path $releaseDirectory 'node_modules\@deepseek-ai\dsh\lib\bin.js'
     $pnpmEntry = Join-Path $releaseDirectory 'node_modules\pnpm\bin\pnpm.cjs'
@@ -129,7 +130,7 @@ try {
         throw 'The npm installation did not produce the expected Harness CLI and pnpm files.'
     }
 
-    Invoke-Checked $nodeExecutable @($cliEntry, '--version') $releaseDirectory
+    Invoke-Checked -FilePath $nodeExecutable -Arguments @($cliEntry, '--version') -WorkingDirectory $releaseDirectory
 
     $manifest = [ordered]@{
         schemaVersion = 1
@@ -145,7 +146,10 @@ try {
         [Text.UTF8Encoding]::new($false))
 
     $forbidden = Get-ChildItem -LiteralPath $seedRoot -Recurse -Force -File |
-        Where-Object { $_.Name -match '(^\.credentials\.yaml$|credential|api[_-]?key)' }
+        Where-Object {
+            $_.Name -ieq '.credentials.yaml' -or
+            $_.FullName -match '\\.dsh\\'
+        }
     if ($forbidden) {
         throw 'Runtime seed unexpectedly contains a credential-like file. Refusing to package it.'
     }

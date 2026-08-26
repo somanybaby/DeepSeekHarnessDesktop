@@ -20,6 +20,9 @@
     <Product>DeepSeek Harness Desktop</Product>
     <Description>DeepSeek Harness Windows desktop client</Description>
     <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
+    <!-- Installer staging can contain third-party source files. It is never
+         application source and must not be picked up by SDK default globs. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);installer-staging/**;artifacts/**;installer/**/bin/**;installer/**/obj/**</DefaultItemExcludes>
     <!-- XML reference documentation is not a runtime asset. Excluding it also
          keeps single-file publish from mapping several WebView2 docs to one
          bundle destination on the first publish into a clean directory. -->
@@ -28,5 +31,11 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3537.50" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The bootstrapper is its own SDK project. Its generated C# files must
+         never become part of the WPF desktop application's default glob. -->
+    <Compile Remove="installer\**\*.cs" />
   </ItemGroup>
 </Project>
