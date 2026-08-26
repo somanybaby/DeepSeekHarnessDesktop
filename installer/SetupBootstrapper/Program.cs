@@ -1,7 +1,7 @@
 using System.Diagnostics;
-using System.Formats.Tar;
 using System.IO.Compression;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -113,36 +113,208 @@ internal static class Program
             + Path.DirectorySeparatorChar;
 
         using var gzip = new GZipStream(payload, CompressionMode.Decompress);
-        using var reader = new TarReader(gzip, leaveOpen: false);
-        TarEntry? entry;
-        while ((entry = reader.GetNextEntry()) is not null)
+        var header = new byte[512];
+        string? pendingPaxPath = null;
+        while (ReadTarBlock(gzip, header))
         {
-            var relativeName = entry.Name.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+            if (header.All(value => value == 0))
+            {
+                return;
+            }
+
+            var entryType = (char)header[156];
+            var entryLength = ReadTarNumber(header.AsSpan(124, 12));
+            if (entryLength < 0)
+            {
+                throw new InvalidOperationException("安装包包含无效的文件长度。");
+            }
+
+            if (entryType == 'x')
+            {
+                pendingPaxPath = ReadPaxPath(gzip, entryLength);
+                SkipTarPadding(gzip, entryLength);
+                continue;
+            }
+
+            var relativeName = (pendingPaxPath ?? GetTarEntryName(header))
+                .Replace('/', Path.DirectorySeparatorChar)
+                .Replace('\\', Path.DirectorySeparatorChar);
+            pendingPaxPath = null;
+            if (string.IsNullOrWhiteSpace(relativeName))
+            {
+                throw new InvalidOperationException("安装包包含无效的文件路径。");
+            }
+
             var targetPath = Path.GetFullPath(Path.Combine(temporaryRoot, relativeName));
             if (!targetPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("安装包包含不安全的文件路径。");
             }
 
-            if (entry.EntryType == TarEntryType.Directory)
+            if (entryType == '5')
             {
                 Directory.CreateDirectory(targetPath);
                 continue;
             }
 
-            if (entry.EntryType is TarEntryType.SymbolicLink or TarEntryType.HardLink)
+            if (entryType is '1' or '2')
             {
                 throw new InvalidOperationException("安装包不能包含链接文件。");
             }
 
-            if (entry.DataStream is null)
+            if (entryType is not ('\0' or '0'))
             {
-                continue;
+                throw new InvalidOperationException("安装包包含不支持的文件类型。");
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
             using var output = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            entry.DataStream.CopyTo(output);
+            CopyTarData(gzip, output, entryLength);
+            SkipTarPadding(gzip, entryLength);
+        }
+
+        throw new InvalidOperationException("安装包意外结束。");
+    }
+
+    private static string? ReadPaxPath(Stream source, long length)
+    {
+        if (length < 0 || length > 1024 * 1024)
+        {
+            throw new InvalidOperationException("安装包包含异常的 PAX 扩展头。");
+        }
+
+        var data = new byte[(int)length];
+        if (!ReadTarBlock(source, data))
+        {
+            throw new InvalidOperationException("安装包中的 PAX 扩展头不完整。");
+        }
+
+        foreach (var line in Encoding.UTF8.GetString(data).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = line.IndexOf(' ');
+            if (separator < 0 || separator == line.Length - 1)
+            {
+                continue;
+            }
+
+            var attribute = line[(separator + 1)..];
+            const string pathPrefix = "path=";
+            if (attribute.StartsWith(pathPrefix, StringComparison.Ordinal))
+            {
+                return attribute[pathPrefix.Length..];
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ReadTarBlock(Stream source, byte[] buffer)
+    {
+        var offset = 0;
+        while (offset < buffer.Length)
+        {
+            var read = source.Read(buffer, offset, buffer.Length - offset);
+            if (read == 0)
+            {
+                if (offset == 0)
+                {
+                    return false;
+                }
+
+                throw new InvalidOperationException("安装包中的 TAR 文件不完整。");
+            }
+
+            offset += read;
+        }
+
+        return true;
+    }
+
+    private static string GetTarEntryName(byte[] header)
+    {
+        var name = ReadTarText(header.AsSpan(0, 100));
+        var prefix = ReadTarText(header.AsSpan(345, 155));
+        return string.IsNullOrWhiteSpace(prefix) ? name : prefix + "/" + name;
+    }
+
+    private static string ReadTarText(ReadOnlySpan<byte> bytes)
+    {
+        var end = bytes.IndexOf((byte)0);
+        if (end < 0)
+        {
+            end = bytes.Length;
+        }
+
+        return Encoding.UTF8.GetString(bytes[..end]).TrimEnd(' ');
+    }
+
+    private static long ReadTarNumber(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length == 0)
+        {
+            return 0;
+        }
+
+        if ((bytes[0] & 0x80) != 0)
+        {
+            long value = bytes[0] & 0x7f;
+            for (var index = 1; index < bytes.Length; index++)
+            {
+                value = checked((value << 8) | bytes[index]);
+            }
+
+            return value;
+        }
+
+        long result = 0;
+        foreach (var value in bytes)
+        {
+            if (value is 0 or (byte)' ')
+            {
+                continue;
+            }
+
+            if (value is < (byte)'0' or > (byte)'7')
+            {
+                throw new InvalidOperationException("安装包包含无效的 TAR 数字字段。");
+            }
+
+            result = checked((result << 3) + value - (byte)'0');
+        }
+
+        return result;
+    }
+
+    private static void CopyTarData(Stream source, Stream destination, long length)
+    {
+        var buffer = new byte[1024 * 1024];
+        var remaining = length;
+        while (remaining > 0)
+        {
+            var requested = (int)Math.Min(buffer.Length, remaining);
+            var read = source.Read(buffer, 0, requested);
+            if (read == 0)
+            {
+                throw new InvalidOperationException("安装包中的文件内容不完整。");
+            }
+
+            destination.Write(buffer, 0, read);
+            remaining -= read;
+        }
+    }
+
+    private static void SkipTarPadding(Stream source, long length)
+    {
+        var padding = (512 - (length % 512)) % 512;
+        if (padding == 0)
+        {
+            return;
+        }
+
+        var discarded = new byte[padding];
+        if (!ReadTarBlock(source, discarded))
+        {
+            throw new InvalidOperationException("安装包中的文件填充不完整。");
         }
     }
 
