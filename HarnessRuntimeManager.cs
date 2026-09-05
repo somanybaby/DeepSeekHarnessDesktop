@@ -776,7 +776,7 @@ public sealed partial class HarnessRuntimeManager : IAsyncDisposable
                 && Uri.TryCreate(match.Groups["url"].Value, UriKind.Absolute, out var uri)
                 && IsTrustedLoopbackUri(uri))
             {
-                readyUrl.TrySetResult(NormalizeRootUri(uri));
+                readyUrl.TrySetResult(NormalizeStartupUri(uri));
             }
         };
 
@@ -1052,7 +1052,7 @@ public sealed partial class HarnessRuntimeManager : IAsyncDisposable
 
     private void PublishLog(string channel, string message)
     {
-        var line = $"[{channel}] {message}";
+        var line = $"[{channel}] {RedactLaunchToken(message)}";
         _diagnosticLines.Enqueue(line);
         while (_diagnosticLines.Count > MaximumDiagnosticLines
                && _diagnosticLines.TryDequeue(out _))
@@ -1142,12 +1142,18 @@ public sealed partial class HarnessRuntimeManager : IAsyncDisposable
             && IPAddress.IsLoopback(address);
     }
 
-    private static Uri NormalizeRootUri(Uri uri)
+    internal static string RedactLaunchToken(string value) =>
+        Regex.Replace(value, @"([?&]token=)[^\s&#()]+", "$1[redacted]", RegexOptions.IgnoreCase);
+
+    internal static Uri NormalizeStartupUri(Uri uri)
     {
         var builder = new UriBuilder(uri)
         {
             Path = "/",
-            Query = string.Empty,
+            // Since Harness 0.1.2 the launch URL exchanges this query token for
+            // an HttpOnly session cookie. Keep it for health checks AND WebView;
+            // each has its own cookie jar. Never disable upstream authentication.
+            Query = uri.Query.TrimStart('?'),
             Fragment = string.Empty,
         };
         return builder.Uri;

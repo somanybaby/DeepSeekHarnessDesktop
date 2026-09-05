@@ -13,8 +13,8 @@
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.0</Version>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.0.3</Version>
+    <FileVersion>1.0.3.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <AssemblyTitle>DeepSeek Harness Desktop</AssemblyTitle>
     <Product>DeepSeek Harness Desktop</Product>
@@ -36,6 +36,7 @@
   <ItemGroup>
     <!-- The bootstrapper is its own SDK project. Its generated C# files must
          never become part of the WPF desktop application's default glob. -->
-    <Compile Remove="installer\**\*.cs" />
+    <Compile Remove="installer\**\*.cs;tests\**\*.cs" />
+    <EmbeddedResource Include="packaging\windows-pnpm-workspace.yaml" LogicalName="DeepSeekHarnessDesktop.WindowsPnpmWorkspace" />
   </ItemGroup>
 </Project>

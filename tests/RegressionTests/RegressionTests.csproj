@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/UpdateService.cs" Link="UpdateService.cs" />
+    <Compile Include="../../HarnessRuntimeManager.cs" Link="HarnessRuntimeManager.cs" />
+    <EmbeddedResource Include="../../packaging/windows-pnpm-workspace.yaml" LogicalName="DeepSeekHarnessDesktop.WindowsPnpmWorkspace" />
+  </ItemGroup>
+</Project>

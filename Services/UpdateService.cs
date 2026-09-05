@@ -176,22 +176,17 @@ public sealed class UpdateService : INotifyPropertyChanged, IDisposable
     private const string PortablePendingUpdateFileName = "pending-update.json";
     public const string PortableToolsRelativePath = "node_modules/.bin";
     public const string BundledPnpmVersion = "11.7.0";
-    private const string ReviewedPnpmWorkspace = """
-        packages:
-          - .
-
-        # Deny unreviewed dependency lifecycle scripts. This is intentionally a
-        # fixed allow-list copied from the official Harness workspace policy.
-        strictDepBuilds: true
-        allowBuilds:
-          esbuild: true
-          node-pty: true
-          koffi: true
-          '@deepseek-ai/dsh-subprocess-local': true
-          '@google/genai': false
-          protobufjs: false
-          node-addon-require-builtin: false
-        """;
+    private static string ReviewedPnpmWorkspace
+    {
+        get
+        {
+            using var stream = typeof(UpdateService).Assembly.GetManifestResourceStream(
+                "DeepSeekHarnessDesktop.WindowsPnpmWorkspace")
+                ?? throw new InvalidOperationException("缺少 Windows 运行环境安装策略。");
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+    }
     private static readonly Regex SafeVersionPattern = new(
         "^[0-9A-Za-z][0-9A-Za-z.+-]{0,127}$",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -607,12 +602,17 @@ public sealed class UpdateService : INotifyPropertyChanged, IDisposable
         CancellationToken cancellationToken)
     {
         var runtimeRoot = _options.PortableRuntimeRoot;
-        var safeVersion = SanitizePathSegment(package.Version);
+        // Version/timestamps belong in update-manifest.json, not the working
+        // path. Windows cmd.exe cannot start in a cwd longer than MAX_PATH.
         var operationDirectory = Path.Combine(
             _options.StagingDirectory,
-            $"dsh-{safeVersion}-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
+            $"u-{Guid.NewGuid():N}");
         var stagedRelease = Path.Combine(operationDirectory, "runtime");
         var logDirectory = Path.Combine(operationDirectory, "logs");
+        if (OperatingSystem.IsWindows() && stagedRelease.Length > 160)
+        {
+            throw new InvalidOperationException("更新目录过长，请将运行环境移至更短的本地路径后重试。");
+        }
         Directory.CreateDirectory(stagedRelease);
         Directory.CreateDirectory(logDirectory);
 
@@ -1842,11 +1842,10 @@ public sealed class UpdateService : INotifyPropertyChanged, IDisposable
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
-            var diagnostic = LastNonEmptyLine(result.StandardError)
-                ?? LastNonEmptyLine(result.StandardOutput)
-                ?? "没有可用的错误信息";
+            var diagnostic = SelectProcessDiagnostic(result.StandardError, result.StandardOutput);
+            var logHint = logBasePath is null ? "" : $"；完整日志：{logBasePath}.stderr.log";
             throw new InvalidOperationException(
-                $"命令执行失败（退出码 {result.ExitCode}）：{diagnostic}");
+                $"命令执行失败（退出码 {result.ExitCode}）：{diagnostic}{logHint}");
         }
 
         return result;
@@ -2248,9 +2247,18 @@ public sealed class UpdateService : INotifyPropertyChanged, IDisposable
         return builder.ToString().Trim('.', '-');
     }
 
-    private static string? LastNonEmptyLine(string value) =>
-        value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .LastOrDefault();
+    internal static string SelectProcessDiagnostic(string stderr, string stdout)
+    {
+        static string[] Lines(string value) => Regex.Replace(value, @"\x1b\[[0-9;]*m", "")
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var errorLines = Lines(stderr);
+        var outputLines = Lines(stdout);
+        var diagnostic = errorLines.Concat(outputLines).FirstOrDefault(line =>
+            Regex.IsMatch(line, @"^(?:\w*Error:|ERR[_! ]|\[?ERROR\]?|npm error)", RegexOptions.IgnoreCase));
+        return diagnostic ?? errorLines.Concat(outputLines).LastOrDefault(line =>
+            !Regex.IsMatch(line, @"^(?:Node\.js v|at\s|\^+$|[{}]$)", RegexOptions.IgnoreCase))
+            ?? "没有可用的错误信息，请查看完整日志";
+    }
 
     private PackageMetadata? GetAvailablePackage()
     {

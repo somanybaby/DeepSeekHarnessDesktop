@@ -95,6 +95,7 @@ $setupPath = [IO.Path]::GetFullPath($OutputFile)
 if (-not (Test-SeedRuntime $runtimeSeedPath)) {
     throw "RuntimeSeed is not a valid portable Harness runtime: $runtimeSeedPath"
 }
+& (Join-Path $PSScriptRoot 'Test-WindowsRuntimeSeed.ps1') -RuntimeSeed $runtimeSeedPath
 if (-not (Test-Path -LiteralPath (Join-Path $webViewPath 'msedgewebview2.exe'))) {
     throw "WebView2FixedRuntime does not contain msedgewebview2.exe: $webViewPath"
 }

@@ -2,6 +2,8 @@
 
 [中文说明](README.zh-CN.md)
 
+[Download the latest Windows x64 offline installer](https://github.com/somanybaby/DeepSeekHarnessDesktop/releases/latest)
+
 Windows x64 desktop shell for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 It runs the official UI in an app window, owns a private local backend, keeps a
 single tray-resident instance, exposes API and plugin settings, and provides an
@@ -45,18 +47,22 @@ dotnet build .\DeepSeekHarnessDesktop.csproj -c Release
 The setup is intentionally built locally rather than committed to GitHub:
 GitHub blocks large binaries and the offline payload is large.
 
-1. Materialize a clean runtime seed from an already verified desktop runtime.
-   This removes pnpm symbolic links so a recipient does not need Windows
-   Developer Mode:
+1. Create a clean, Windows x64-only runtime with a hoisted, link-free dependency
+   tree. Supply a private Node distribution (including npm) and pnpm 11.7.0:
 
 ```powershell
-.\scripts\Materialize-RuntimeSeed.ps1 `
-  -SourceRuntime "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime" `
-  -OutputRoot C:\build\dsh-runtime
+.\scripts\New-WindowsRuntimeSeed.ps1 `
+  -OutputRoot C:\build\dsh-runtime `
+  -NodeSource "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime\node" `
+  -PnpmScript "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime\releases\0.1.1-rc.2\node_modules\pnpm\bin\pnpm.cjs" `
+  -StoreDirectory C:\build\pnpm-store `
+  -HarnessVersion 0.1.2-rc.1
 ```
 
-`New-RuntimeSeed.ps1` is also available for a clean build directly from the
-official npm package when no verified local runtime exists.
+Adjust `PnpmScript` to the actual pnpm 11.7.0 path. Updates and builds share the
+reviewed Windows install policy. Embedded non-x64 prebuilds are removed, while
+plugin installation tools remain available. Do not materialize a `.pnpm` tree
+into duplicate package copies.
 
 2. Build a one-file setup. Supply a Microsoft WebView2 **Fixed Version Runtime**
 folder for a fully offline package:
@@ -69,12 +75,53 @@ folder for a fully offline package:
   -OutputFile C:\build\DeepSeekHarnessDesktop-Setup.exe
 ```
 
-Use `-SkipRuntimeLinkValidation` only immediately after a successful
-`Materialize-RuntimeSeed.ps1` run; it avoids repeating a long validation scan.
+The builder rejects foreign native binaries, caches, credentials and duplicate
+virtual-store packages. The older seed scripts are retained only for historical
+diagnostics and are no longer release-build entry points.
 
 The resulting `Setup.exe` installs to the current user's LocalAppData folder,
 creates a desktop shortcut, and starts with no API key. Do not add generated
 runtime or setup files to this repository.
+
+### 1.0.1 fixes and tests
+
+- Short update staging paths and a hoisted dependency layout avoid Windows cwd limits.
+- Harness 0.1.2 startup authentication is preserved for both the health client and
+  WebView cookie jars. Launch tokens are redacted from logs.
+- Failure messages select the actual error instead of the trailing Node version.
+- WebView2, Node.js and .NET are still bundled for offline Windows x64 installation.
+
+Run `dotnet run --project tests/RegressionTests -c Release`. For a disposable
+runtime append `-- --smoke <runtime>`, `-- --update <runtime>` or
+`-- --rollback <runtime>`; never use a live installation for update tests.
+Native-module checks: `node scripts/Smoke-WindowsRuntime.mjs <release-directory>`.
+
+### Installer 1.0.2
+
+The installer now copies extracted files into complete candidates before activation,
+retries transient sharing violations, and restores old files after activation failures.
+Cleanup failures are warnings rather than installation failures. The application is
+launched only after cleanup, with the installed application as its working directory.
+Logs are stored under `%LOCALAPPDATA%\DeepSeekHarnessDesktop\setup-logs`.
+
+Run `dotnet run --project tests/InstallerTests -c Release` for actual Windows lock,
+rollback, retry and cleanup tests. The final setup EXE also accepts
+`--self-test-install <empty-test-directory>` to execute the real extraction and
+installation transaction without shortcuts or GUI launch. Run twice on the same
+marked test directory to verify upgrades. Never target a live installation.
+
+### 1.0.3 installation progress
+
+Normal launches immediately show a progress window with the current phase, weighted
+overall percentage, actual archive/copy byte counts and elapsed time. Installation
+runs on a dedicated STA worker; the UI stays responsive and may be minimized.
+Completion and errors remain visible, with a button to open the installation log.
+Closing is disabled during installation to avoid interrupting file activation.
+
+`--self-test-ui <empty-test-directory>` performs the real installation with a hidden
+form, renders initial/progress/completion frames and records UI responsiveness.
+It neither launches the desktop application nor changes the normal installation.
+GitHub Releases distribute the EXE and SHA-256 checksums separately from the source tree.
 
 ## Upstream
 

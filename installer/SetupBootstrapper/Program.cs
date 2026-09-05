@@ -12,81 +12,174 @@ internal static class Program
     private const string PayloadResourceName = "DeepSeekHarnessDesktop.OfflinePayload";
     private const string ProductFolderName = "DeepSeekHarnessDesktop";
     private const string DesktopExeName = "DeepSeekHarnessDesktop.exe";
+    private static string? _logPath;
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-
-        try
+        // Exercise the very same extraction and installation transaction without
+        // UI, shortcuts or launching the app, in a marked disposable directory.
+        if (args.Length == 2 && args[0] is "--self-test-install" or "--self-test-ui")
         {
-            Install();
-            MessageBox.Show(
-                "安装完成。程序已启动。\r\n\r\n首次安装的 API 配置为空，请在程序底部的“API 配置”中添加。",
-                "DeepSeek Harness Desktop",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            try
+            {
+                var testRoot = Path.GetFullPath(args[1]);
+                var marker = Path.Combine(testRoot, ".installer-test-root");
+                if (Directory.Exists(testRoot) && Directory.EnumerateFileSystemEntries(testRoot).Any() && !File.Exists(marker))
+                    throw new InvalidOperationException("Self-test target must be empty or carry its test marker.");
+                Directory.CreateDirectory(testRoot);
+                File.WriteAllText(marker, "DeepSeekHarnessDesktop installer test fixture");
+                if (args[0] == "--self-test-ui")
+                {
+                    InitializeUi();
+                    Application.Run(new InstallProgressForm(
+                        progress => Install(testRoot, integrateDesktop: false, progress),
+                        () => _logPath, Path.Combine(testRoot, "ui-test-output")));
+                }
+                else
+                {
+                    Install(testRoot, integrateDesktop: false,
+                        progress => WriteLog($"PROGRESS {progress.Percent}% {progress.Stage}: {progress.Detail}"));
+                    Environment.ExitCode = 0;
+                }
+            }
+            catch (Exception error)
+            {
+                WriteLog(error.ToString());
+                Environment.ExitCode = 1;
+            }
+            return;
         }
-        catch (Exception exception)
-        {
-            MessageBox.Show(
-                "安装未完成：\r\n" + exception.Message,
-                "DeepSeek Harness Desktop 安装程序",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-        }
+        InitializeUi();
+        Application.Run(new InstallProgressForm(
+            progress => Install(null, integrateDesktop: true, progress), () => _logPath));
     }
 
-    private static void Install()
+    private static void InitializeUi()
     {
-        EnsureApplicationIsNotRunning();
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+    }
 
+    private static bool Install(string? explicitRoot, bool integrateDesktop, Action<SetupProgress>? onProgress = null)
+    {
+        var progress = new SetupProgressReporter(onProgress);
+        progress.Report("检查安装环境", 1, "检查安装目录和运行中的程序…");
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(localAppData))
         {
             throw new InvalidOperationException("无法定位当前用户的本地应用数据目录。");
         }
 
-        var installRoot = Path.Combine(localAppData, ProductFolderName);
-        Directory.CreateDirectory(installRoot);
-        var temporaryRoot = Path.Combine(installRoot, ".setup-" + Guid.NewGuid().ToString("N"));
-
+        var installRoot = explicitRoot ?? Path.Combine(localAppData, ProductFolderName);
+        var lockId = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(installRoot).ToUpperInvariant())))[..24];
+        using var setupLock = new Mutex(false, "Local\\DSH-Setup-" + lockId);
+        var lockTaken = false;
+        try { lockTaken = setupLock.WaitOne(0); }
+        catch (AbandonedMutexException) { lockTaken = true; }
+        if (!lockTaken) throw new InvalidOperationException("此目录已有安装程序正在运行，请等待它结束。");
         try
         {
-            ExtractPayload(temporaryRoot);
+            Directory.CreateDirectory(installRoot);
+            var logs = Path.Combine(installRoot, "setup-logs");
+            Directory.CreateDirectory(logs);
+            _logPath = Path.Combine(logs, $"setup-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
+            WriteLog("Starting setup; integrateDesktop=" + integrateDesktop);
+            if (integrateDesktop) EnsureApplicationIsNotRunning();
+            var temporaryRoot = Path.Combine(installRoot, ".setup-" + Guid.NewGuid().ToString("N"));
 
-            var payloadRoot = Path.Combine(temporaryRoot, "payload");
-            var incomingApp = Path.Combine(payloadRoot, "app");
-            var incomingRuntime = Path.Combine(payloadRoot, "runtime");
-            var incomingWebView = Path.Combine(payloadRoot, "webview2");
-            ValidatePayload(incomingApp, incomingRuntime, incomingWebView);
-
-            if (Directory.Exists(incomingWebView))
+            try
             {
-                MoveDirectory(incomingWebView, Path.Combine(incomingApp, "webview2"), overwrite: true);
-            }
+                WriteLog("Extracting payload: " + temporaryRoot);
+                progress.Report("解压离线安装包", 5, "准备读取内嵌安装文件…");
+                ExtractPayloadWithProgress(temporaryRoot, progress);
 
-            var runtimeDestination = Path.Combine(installRoot, "runtime");
-            if (!IsValidRuntime(runtimeDestination))
+                var payloadRoot = Path.Combine(temporaryRoot, "payload");
+                var incomingApp = Path.Combine(payloadRoot, "app");
+                var incomingRuntime = Path.Combine(payloadRoot, "runtime");
+                var incomingWebView = Path.Combine(payloadRoot, "webview2");
+                progress.Report("校验安装文件", 57, "检查桌面程序、Windows 运行环境和后台入口…");
+                ValidatePayload(incomingApp, incomingRuntime, incomingWebView);
+                var runtimeDestination = Path.Combine(installRoot, "runtime");
+                var needsRuntime = !IsValidRuntime(runtimeDestination);
+                static long TreeBytes(string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Sum(file => new FileInfo(file).Length);
+                var copyTotal = TreeBytes(incomingApp) + TreeBytes(incomingWebView) + (needsRuntime ? TreeBytes(incomingRuntime) : 0);
+                long copiedBytes = 0;
+                void OnCopied(long bytes)
+                {
+                    copiedBytes += bytes;
+                    progress.Report("复制 Windows 安装文件", 60 + (int)(30d * copiedBytes / Math.Max(1, copyTotal)),
+                        $"已复制 {SetupProgressReporter.FormatBytes(copiedBytes)} / {SetupProgressReporter.FormatBytes(copyTotal)}");
+                }
+                progress.Report("复制 Windows 安装文件", 60, $"需要复制 {SetupProgressReporter.FormatBytes(copyTotal)}，正在准备文件…");
+                // Do not rename payload/app: a scanner can temporarily hold the newly
+                // extracted directory. Copy into complete candidates before activation.
+                var candidateApp = Path.Combine(temporaryRoot, "ready-app");
+                WriteLog("Preparing application candidate");
+                DirectoryDeployment.CopyTree(incomingApp, candidateApp, WriteLog, OnCopied);
+                DirectoryDeployment.CopyTree(incomingWebView, Path.Combine(candidateApp, "webview2"), WriteLog, OnCopied);
+                string? candidateRuntime = null;
+                if (needsRuntime)
+                {
+                    WriteLog("Preparing runtime candidate");
+                    candidateRuntime = Path.Combine(temporaryRoot, "ready-runtime");
+                    DirectoryDeployment.CopyTree(incomingRuntime, candidateRuntime, WriteLog, OnCopied);
+                }
+                else WriteLog("Keeping existing valid runtime and user data");
+                if (integrateDesktop) EnsureApplicationIsNotRunning();
+                var changes = new List<DirectoryDeployment.Change>();
+                try
+                {
+                    progress.Report("启用安装文件", 92, "替换程序文件并保留可恢复的旧文件…");
+                    if (candidateRuntime is not null)
+                        changes.Add(DirectoryDeployment.Activate(candidateRuntime, runtimeDestination, WriteLog));
+                    var appDestination = Path.Combine(installRoot, "app");
+                    changes.Add(DirectoryDeployment.Activate(candidateApp, appDestination, WriteLog));
+                    ValidatePayload(appDestination, runtimeDestination, Path.Combine(appDestination, "webview2"));
+                    progress.Report("配置桌面快捷方式", 94, "安装文件已验证，现有用户配置保持不变。");
+                    if (integrateDesktop) CreateDesktopShortcut(Path.Combine(appDestination, DesktopExeName), appDestination);
+                    WriteLog("Installation transaction committed");
+                }
+                catch (Exception installError)
+                {
+                    var errors = new List<Exception> { installError };
+                    foreach (var change in changes.AsEnumerable().Reverse())
+                        try { DirectoryDeployment.Rollback(change, WriteLog); }
+                        catch (Exception rollbackError) { errors.Add(rollbackError); }
+                    throw new AggregateException("安装替换失败，已尝试恢复旧文件；请查看日志。", errors);
+                }
+            }
+            catch (Exception error) { WriteLog("INSTALL FAILED: " + error); throw; }
+            finally
             {
-                MoveDirectory(incomingRuntime, runtimeDestination, overwrite: true);
+                // Cleanup is best-effort and MUST NOT replace the primary exception
+                // or report a successfully committed installation as a failure.
+                progress.Report("清理临时安装文件", 96, "正在收尾，请稍候。大型离线包的清理可能需要一些时间。");
+                DirectoryDeployment.TryCleanup(temporaryRoot, installRoot, WriteLog);
             }
-
-            var appDestination = Path.Combine(installRoot, "app");
-            MoveDirectory(incomingApp, appDestination, overwrite: true);
-
-            var executablePath = Path.Combine(appDestination, DesktopExeName);
-            CreateDesktopShortcut(executablePath, appDestination);
-            Process.Start(new ProcessStartInfo(executablePath) { UseShellExecute = true });
+            // Launch only after cleanup, from the installed directory, never the
+            // extraction tree. Failure to launch does not undo a valid installation.
+            var launched = false;
+            if (integrateDesktop)
+            {
+                progress.Report("启动 DeepSeek Harness Desktop", 99, "安装已完成，正在启动桌面程序…");
+                var appDestination = Path.Combine(installRoot, "app");
+                try { launched = Process.Start(new ProcessStartInfo(Path.Combine(appDestination, DesktopExeName)) { UseShellExecute = true, WorkingDirectory = appDestination }) is not null; }
+                catch (Exception error) { WriteLog("Launch warning (installation completed): " + error); }
+            }
+            WriteLog("SETUP SUCCESS");
+            progress.Report("安装完成", 100, "安装已完成。", force: true);
+            return launched;
         }
-        finally
-        {
-            if (Directory.Exists(temporaryRoot))
-            {
-                Directory.Delete(temporaryRoot, recursive: true);
-            }
-        }
+        finally { setupLock.ReleaseMutex(); }
+    }
+
+    private static void WriteLog(string message)
+    {
+        if (_logPath is null) return;
+        try { File.AppendAllText(_logPath, $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}", Encoding.UTF8); }
+        catch { /* Logging must never replace the installation error. */ }
     }
 
     private static void EnsureApplicationIsNotRunning()
@@ -100,7 +193,9 @@ internal static class Program
         throw new InvalidOperationException("请先从右下角托盘图标退出 DeepSeek Harness Desktop，再重新运行安装程序。");
     }
 
-    private static void ExtractPayload(string temporaryRoot)
+    private static void ExtractPayload(string temporaryRoot) => ExtractPayloadWithProgress(temporaryRoot, null);
+
+    private static void ExtractPayloadWithProgress(string temporaryRoot, SetupProgressReporter? progress)
     {
         using var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream(PayloadResourceName);
         if (payload is null)
@@ -169,7 +264,9 @@ internal static class Program
 
             Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
             using var output = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            CopyTarData(gzip, output, entryLength);
+            CopyTarData(gzip, output, entryLength, () => progress?.Report(
+                "解压离线安装包", 5 + (int)(50d * payload.Position / Math.Max(1, payload.Length)),
+                $"已读取安装包 {SetupProgressReporter.FormatBytes(payload.Position)} / {SetupProgressReporter.FormatBytes(payload.Length)}"));
             SkipTarPadding(gzip, entryLength);
         }
 
@@ -285,7 +382,7 @@ internal static class Program
         return result;
     }
 
-    private static void CopyTarData(Stream source, Stream destination, long length)
+    private static void CopyTarData(Stream source, Stream destination, long length, Action? onChunk = null)
     {
         var buffer = new byte[1024 * 1024];
         var remaining = length;
@@ -300,6 +397,7 @@ internal static class Program
 
             destination.Write(buffer, 0, read);
             remaining -= read;
+            onChunk?.Invoke();
         }
     }
 
@@ -364,43 +462,6 @@ internal static class Program
         catch
         {
             return false;
-        }
-    }
-
-    private static void MoveDirectory(string source, string destination, bool overwrite)
-    {
-        if (!Directory.Exists(source))
-        {
-            throw new DirectoryNotFoundException("找不到待安装的目录：" + source);
-        }
-
-        var parent = Path.GetDirectoryName(destination) ?? throw new InvalidOperationException("安装目标无效。");
-        Directory.CreateDirectory(parent);
-        var backup = destination + ".previous-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-        var hadExisting = Directory.Exists(destination);
-
-        if (hadExisting)
-        {
-            if (!overwrite)
-            {
-                throw new IOException("目标目录已存在：" + destination);
-            }
-
-            Directory.Move(destination, backup);
-        }
-
-        try
-        {
-            Directory.Move(source, destination);
-        }
-        catch
-        {
-            if (hadExisting && Directory.Exists(backup) && !Directory.Exists(destination))
-            {
-                Directory.Move(backup, destination);
-            }
-
-            throw;
         }
     }
 

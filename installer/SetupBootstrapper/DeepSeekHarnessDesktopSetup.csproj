@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>DeepSeekHarnessDesktopSetup</AssemblyName>
+    <Version>1.0.3</Version>
+    <FileVersion>1.0.3.0</FileVersion>
     <RootNamespace>DeepSeekHarnessDesktopSetup</RootNamespace>
     <PayloadPath Condition="'$(PayloadPath)' == ''"></PayloadPath>
   </PropertyGroup>

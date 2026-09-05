@@ -1,0 +1,22 @@
+packages:
+  - .
+
+# A relocatable Windows x64 tree: no pnpm junctions to expand into duplicate copies.
+nodeLinker: hoisted
+packageImportMethod: copy
+supportedArchitectures:
+  os:
+    - win32
+  cpu:
+    - x64
+
+# Keep the reviewed lifecycle allow-list for both updates and offline builds.
+strictDepBuilds: true
+allowBuilds:
+  esbuild: true
+  node-pty: true
+  koffi: true
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': false
+  protobufjs: false
+  node-addon-require-builtin: false
