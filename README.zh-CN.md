@@ -34,7 +34,7 @@ dotnet build .\DeepSeekHarnessDesktop.csproj -c Release
 
 ## 构建完整离线安装 EXE
 
-完整安装器体积较大，因此只在本地构建，不提交到 GitHub。
+完整安装器在本地构建，通过 GitHub Releases 发布下载；大型 EXE 和生成的运行环境文件不提交到 Git 源码仓库。
 
 1. 重新安装 Windows x64 专用依赖，生成无符号链接、无缓存和无凭据的种子。Node.js 必须包含 npm，pnpm 固定为 11.7.0：
 
@@ -42,7 +42,7 @@ dotnet build .\DeepSeekHarnessDesktop.csproj -c Release
 .\scripts\New-WindowsRuntimeSeed.ps1 `
   -OutputRoot C:\build\dsh-runtime `
   -NodeSource "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime\node" `
-  -PnpmScript "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime\releases\0.1.1-rc.2\node_modules\pnpm\bin\pnpm.cjs" `
+  -PnpmScript "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime\releases\0.1.2-rc.1\node_modules\pnpm\bin\pnpm.cjs" `
   -StoreDirectory C:\build\pnpm-store `
   -HarnessVersion 0.1.2-rc.1
 ```

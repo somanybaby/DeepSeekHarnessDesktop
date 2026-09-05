@@ -44,8 +44,8 @@ dotnet build .\DeepSeekHarnessDesktop.csproj -c Release
 
 ## Build a complete offline setup EXE
 
-The setup is intentionally built locally rather than committed to GitHub:
-GitHub blocks large binaries and the offline payload is large.
+Build the installer locally and distribute it through GitHub Releases.
+Do not commit the large EXE or generated runtime files to the Git source tree.
 
 1. Create a clean, Windows x64-only runtime with a hoisted, link-free dependency
    tree. Supply a private Node distribution (including npm) and pnpm 11.7.0:
@@ -54,7 +54,7 @@ GitHub blocks large binaries and the offline payload is large.
 .\scripts\New-WindowsRuntimeSeed.ps1 `
   -OutputRoot C:\build\dsh-runtime `
   -NodeSource "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime\node" `
-  -PnpmScript "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime\releases\0.1.1-rc.2\node_modules\pnpm\bin\pnpm.cjs" `
+  -PnpmScript "$env:LOCALAPPDATA\DeepSeekHarnessDesktop\runtime\releases\0.1.2-rc.1\node_modules\pnpm\bin\pnpm.cjs" `
   -StoreDirectory C:\build\pnpm-store `
   -HarnessVersion 0.1.2-rc.1
 ```
